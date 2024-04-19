@@ -3,13 +3,20 @@ import tensorflow as tf
 import math
 import matplotlib.pyplot as plt
 from tensorflow.keras.preprocessing.image import ImageDataGenerator
-from sklearn.metrics import confusion_matrix, classification_report, ConfusionMatrixDisplay 
+from sklearn.metrics import confusion_matrix, classification_report, ConfusionMatrixDisplay ,cohen_kappa_score,precision_score
 
 import cv2
-model = tf.keras.models.load_model('../MobilenetV3/saved/latest_checkpoint.h5')
-model.summary()
+
+BATCH_SIZE = 32
+# model = tf.keras.models.load_model('./saved/best/Large/Batch 16 Split 0.8 No InnerMove/latest_checkpoint.h5')
+model = tf.keras.models.load_model('./saved/latest_checkpoint.h5')
+# model.summary()
 # Visualize
 
+
+test_dir  = './dataset/test'
+# test_dir  = './dataset-b/test'
+# test_dir  = '../../../../nodeserver/data/grades'
 def foreground_extractor(x):
      # Convert image to grayscale
     gray = cv2.cvtColor(x.astype(np.uint8), cv2.COLOR_BGR2GRAY)
@@ -101,48 +108,103 @@ def plot_value_array(i, predictions_array, true_label):
   thisplot[true_label].set_color('blue')
 
 
-test_dir  = './dataset/test'
-test_datagen = ImageDataGenerator(
-                                    preprocessing_function  = crop(),
-                                   )
-                                   
+test_images = tf.keras.utils.image_dataset_from_directory(test_dir,
+                                                            shuffle=False,
+                                                            batch_size=BATCH_SIZE,
+                                                            # validation_split= 0.05,
+                                                            # subset='validation',
+                                                            seed=20,
+                                                             label_mode = "categorical",
+                                                            image_size=(224, 224))
 
-test_images = test_datagen.flow_from_directory(test_dir, target_size=(224,224),
-                batch_size=32, class_mode="categorical", shuffle=False)
-
-class_names = list(test_images.class_indices.keys())
-true_labels = test_images.classes
+class_names =  test_images.class_names
+one_hot_true_labels = []
 all_images = []
-for i in range(len(test_images)):
-    batch_images, _ = test_images[i]
-    all_images.extend(batch_images)
-one_hot_true_labels = np.eye(len(class_names))[true_labels]
+for images, labels in test_images:
+    all_images.extend(images.numpy())
+    one_hot_true_labels.extend(labels.numpy().astype(np.uint8))
+
+true_labels = np.argmax(one_hot_true_labels, axis=1)
 print(class_names)
 
-plt.figure(figsize=(10, 10))
-for images, labels in  next(zip(test_images)):
-        for i in range(9):
-                ax = plt.subplot(3, 3, i + 1)
-                plt.imshow(images[i].astype("uint8"))
-                plt.title(class_names[np.argmax(labels[i])])
-                plt.axis("off")
-plt.show()
+# plt.figure(figsize=(10, 10))
+# for images, labels in  next(zip(test_images)):
+#         for i in range(9):
+#                 ax = plt.subplot(3, 3, i + 1)
+#                 plt.imshow(images[i].astype("uint8"))
+#                 plt.title(class_names[np.argmax(labels[i])])
+#                 plt.axis("off")
+# plt.show()
 
+
+def perf_measure(y_actual, y_pred):
+    class_id = set(y_actual).union(set(y_pred))
+    TP = []
+    FP = []
+    TN = []
+    FN = []
+
+    for index ,_id in enumerate(class_id):
+        TP.append(0)
+        FP.append(0)
+        TN.append(0)
+        FN.append(0)
+        for i in range(len(y_pred)):
+            if y_actual[i] == y_pred[i] == _id:
+                TP[index] += 1
+            if y_pred[i] == _id and y_actual[i] != y_pred[i]:
+                FP[index] += 1
+            if y_actual[i] == y_pred[i] != _id:
+                TN[index] += 1
+            if y_pred[i] != _id and y_actual[i] != y_pred[i]:
+                FN[index] += 1
+
+
+    return sum(TP), sum(FP), sum(TN), sum(FN)
 
 # print('\nEvaluating test images....')
 # test_loss, test_acc = model.evaluate(test_images, verbose=1)
 # print('\nTest accuracy:', test_acc)
-print('\nPredicting test images....')
+# print('\nPredicting test images....')
 predictions = model.predict(test_images)
 
 predicted_labels = np.argmax(predictions, axis=1)
 # print(true_labels, predicted_labels, predictions)
 conf_matrix = confusion_matrix(true_labels, predicted_labels)
 overall_accuracy = np.trace(conf_matrix) / np.sum(conf_matrix)
+print( np.trace(conf_matrix) ,  np.sum(conf_matrix))
 print('\nTest accuracy from confusion matrix:', overall_accuracy)
+
+
+TP, FP, TN, FN = perf_measure(true_labels,predicted_labels)
+print(TP, FP,TN,FN)
+
+accuracy = (TP + TN) / (TP + TN + FP + FN)
+precision = TP / (TP + FP)
+recall = TP / (TP + FN)
+f1_score = 2 * (precision * recall) / (precision + recall)
+specificity = TN / (TN + FP)
+false_positive_rate = FP / (TN + FP)
+
+
+
+print("Confusion Matrix:")
+print(conf_matrix)
+print("\nEvaluation Metrics:")
+print(f"Accuracy: {accuracy*100:.2f}")
+print(f"Precision: {precision*100:.2f}")
+print(f"Recall: {recall*100:.2f}")
+print(f"F1 Score: {f1_score*100:.2f}")
+print(f"Cohen Kappa: {cohen_kappa_score(true_labels, predicted_labels)*100:.2f}")
+print(f"False Positive Rate: {false_positive_rate*100:.2f}")
+print(f"Specificity: {specificity*100:.2f}")
 correct_per_class = np.diag(conf_matrix)
 total_per_class = np.sum(conf_matrix, axis=1)
 incorrect_per_class = total_per_class - correct_per_class
+
+accuracy_per_class = (correct_per_class / total_per_class) * 100
+
+print("Accuracy Per Class: ", accuracy_per_class)
 
 plt.figure(figsize=(10, 6))
 plt.bar(class_names, correct_per_class, color='green', label='Correct Predictions')
@@ -171,7 +233,8 @@ plt.figure(figsize=(2*2*num_cols, 2*num_rows))
 j = 0
 i = 0
 while j < num_images:
-  if np.argmax(one_hot_true_labels[i])==3 and np.argmax(one_hot_true_labels[i]) != np.argmax(predictions[i]) :
+  #  np.argmax(one_hot_true_labels[i])==3 and 
+  if np.argmax(one_hot_true_labels[i]) != np.argmax(predictions[i]) :
     plt.subplot(num_rows, 2*num_cols, 2*j+1)
     plot_image(i, predictions[i], one_hot_true_labels, all_images)
     plt.subplot(num_rows, 2*num_cols, 2*j+2)

@@ -58,10 +58,10 @@ train_dir = './dataset/train'
 augmented_dir = './dataset/augmented'
 val_dir = './dataset/val'
 test_dir = './dataset/test'
-EPOCHS = 20
+EPOCHS = 25
 NUM_CLASSES = 8 
-BATCH_SIZE = 32
-IMAGE_SIZE = 224
+BATCH_SIZE = 16
+IMAGE_SIZE = 320
 
 def geodesic_reconstruction_mmce(f, B, n):
     # Initialization
@@ -193,30 +193,35 @@ train_gen_unaugmented = tf.keras.utils.image_dataset_from_directory(train_dir,
                                                             shuffle=True,
                                                             batch_size=BATCH_SIZE,
                                                             seed=20,
-                                                            label_mode = "categorical",
+                                                            label_mode = "int",
                                                             image_size=(IMAGE_SIZE, IMAGE_SIZE))
 
-train_gen_augmented = tf.keras.utils.image_dataset_from_directory(augmented_dir,
+try:
+    train_gen_augmented = tf.keras.utils.image_dataset_from_directory(augmented_dir,
                                                             shuffle=True,
                                                             batch_size=BATCH_SIZE,
                                                             seed=20,
-                                                            label_mode = "categorical",
+                                                            label_mode = "int",
                                                             image_size=(IMAGE_SIZE, IMAGE_SIZE))
-train_gen = train_gen_unaugmented.concatenate(train_gen_augmented)
-# train_gen = train_gen.shuffle(buffer_size=len(train_gen_unaugmented))
+    train_gen = train_gen_unaugmented.concatenate(train_gen_augmented)
+except:
+    train_gen = train_gen_unaugmented
+    # train_gen = train_gen_unaugmented
+    # train_gen = train_gen_augmented
+    # train_gen = train_gen.shuffle(buffer_size=len(train_gen_unaugmented))
 
 val_gen = tf.keras.utils.image_dataset_from_directory(val_dir,
                                                             shuffle=True,
                                                             batch_size=BATCH_SIZE,
                                                             seed=20,
-                                                             label_mode = "categorical",
+                                                            label_mode = "int",
                                                             image_size=(IMAGE_SIZE, IMAGE_SIZE))
 
 test_gen = tf.keras.utils.image_dataset_from_directory(test_dir,
-                                                            shuffle=True,
+                                                            shuffle=False,
                                                             batch_size=BATCH_SIZE,
                                                             seed=20,
-                                                             label_mode = "categorical",
+                                                            label_mode = "int",
                                                             image_size=(IMAGE_SIZE, IMAGE_SIZE))
 
 
@@ -229,8 +234,8 @@ test_gen = test_gen.prefetch(buffer_size=AUTOTUNE)
 pretrained_model = tf.keras.applications.MobileNetV3Small(
                         input_shape=(IMAGE_SIZE,IMAGE_SIZE,3),
                         weights="imagenet",
+                        # pooling="avg",
                         include_top=False,
-                        # include_preprocessing=False
                     )
 try:
     model = tf.keras.models.load_model('./saved/latest_checkpoint.h5')
@@ -238,93 +243,132 @@ try:
     
     model.trainable = True
     # Fine-tune from this layer onwards
-    # fine_tune_at = 100
+    fine_tune_at = 100
 
     # # Freeze all the layers before the `fine_tune_at` layer
-    # for layer in model.layers[:fine_tune_at]:
-    #     layer.trainable = False
+    for layer in model.layers[:fine_tune_at]:
+        layer.trainable = False
     
-    model.compile(optimizer=Adam(learning_rate=1e-5), 
-                loss='categorical_crossentropy', 
-                metrics=['accuracy'])
+    earlyStopping = tf.keras.callbacks.EarlyStopping(monitor='val_loss', patience=5)
+    plateau = ReduceLROnPlateau(monitor="val_loss", mode="min", patience=1,
+                                min_lr=1e-8, factor=0.3, min_delta=0.01,
+                                verbose=1)
+    
+    
+    model.compile(optimizer=Adam(learning_rate=1e-4), 
+                loss='sparse_categorical_crossentropy', 
+                metrics=['sparse_categorical_accuracy'])
     print('Fine tuning model...')
-    EPOCHS = EPOCHS + 10
+    EPOCHS = EPOCHS * 2
+
+    csv_logger = tf.keras.callbacks.CSVLogger('./saved/train.log')
+
+    checkpointer = ModelCheckpoint(filepath='./saved/latest_checkpoint.h5',
+                                    verbose=1, save_best_only=True,
+                                monitor="val_loss", mode="min",
+                                )
+    history = model.fit(train_gen,
+                        epochs=EPOCHS,
+                        callbacks=[checkpointer,plateau, earlyStopping,csv_logger],
+                        validation_data=val_gen,
+                        )
+
+
+    
+    acc = history.history['val_sparse_categorical_accuracy']
+    val_acc = history.history['val_sparse_categorical_accuracy']
+
+    loss = history.history['loss']
+    val_loss = history.history['val_loss']
+    
 except:
     print('Start model (Feature extraction method)...')
     data_augmentation = tf.keras.Sequential([
         tf.keras.layers.RandomFlip(),
-        tf.keras.layers.RandomBrightness(0.05),
-        tf.keras.layers.RandomZoom(0.05),
+        tf.keras.layers.RandomBrightness(0.01),
+        tf.keras.layers.RandomZoom(0.01),
         tf.keras.layers.RandomRotation(0.5),
     ])
 
-    for layer in pretrained_model.layers:
-        pretrained_model.trainable = False
+    # for layer in pretrained_model.layers:
+    #     pretrained_model.trainable = False
 
-    inputs = tf.keras.Input(shape=(160, 160, 3))
+    pretrained_model.trainable = False
+    global_average_layer =  tf.keras.layers.GlobalAveragePooling2D()
+    prediction_layer =  tf.keras.layers.Dense(NUM_CLASSES, activation='softmax')
+    inputs = tf.keras.Input(shape=(IMAGE_SIZE, IMAGE_SIZE, 3))
     x = data_augmentation(inputs)
-    x = tf.keras.layers.Flatten()(pretrained_model.output)
-    outputs = tf.keras.layers.Dense(NUM_CLASSES, activation='softmax')(x)
-    model = tf.keras.Model(pretrained_model.input, outputs)
-    model.compile(optimizer=Adam(learning_rate=0.0001), 
-                loss='categorical_crossentropy', 
-                metrics=['accuracy'])
+    x = pretrained_model(x, training=False)
+    x = global_average_layer(x)
+    x = tf.keras.layers.Dropout(0.2)(x)
+    outputs = prediction_layer(x)
+    # x = tf.keras.layers.Flatten()(pretrained_model.output)
+    # x = tf.keras.layers.Dense(512, activation='relu')(x)
+
+    model = tf.keras.Model(inputs, outputs)
+    model.compile(optimizer=Adam(learning_rate=1e-4), 
+                loss='sparse_categorical_crossentropy', 
+                metrics=['sparse_categorical_accuracy'])
     
     model.summary()
 
 
+    earlyStopping = tf.keras.callbacks.EarlyStopping(monitor='val_loss', patience=3)
+    plateau = ReduceLROnPlateau(monitor="val_loss", mode="min", patience=1,
+                                min_lr=1e-8, factor=0.3, min_delta=0.01,
+                                verbose=1)
 
-earlyStopping = tf.keras.callbacks.EarlyStopping(monitor='val_loss', patience=3)
-plateau = ReduceLROnPlateau(monitor="val_loss", mode="min", patience=1,
-                            min_lr=1e-8, factor=0.3, min_delta=0.01,
-                            verbose=1)
+    csv_logger = tf.keras.callbacks.CSVLogger('./saved/train.log')
 
-checkpointer = ModelCheckpoint(filepath='./saved/latest_checkpoint.h5', verbose=1, save_best_only=True,
-                               monitor="val_accuracy", mode="max",
-                              )
-history = model.fit(train_gen,
-                    epochs=EPOCHS,
-                    callbacks=[checkpointer,plateau, earlyStopping],
-                    validation_data=val_gen,
+    checkpointer = ModelCheckpoint(filepath='./saved/latest_checkpoint.h5',
+                                    verbose=1, save_best_only=True,
+                                monitor="val_sparse_categorical_accuracy", mode="max",
+                                )
+    history = model.fit(train_gen,
+                        epochs=EPOCHS,
+                        callbacks=[plateau, earlyStopping,csv_logger],
+                        validation_data=val_gen,
+                        )
+
+
+    acc = history.history['sparse_categorical_accuracy']
+    val_acc = history.history['val_sparse_categorical_accuracy']
+
+    loss = history.history['loss']
+    val_loss = history.history['val_loss']
+
+
+    # Fine tune 
+    model.save('./saved/latest_checkpoint.h5')
+    print("Fine-tuning....")
+    pretrained_model.trainable = True
+    # Fine-tune from this layer onwards
+    fine_tune_at = 100
+
+    # # Freeze all the layers before the `fine_tune_at` layer
+    for layer in model.layers[:fine_tune_at]:
+        layer.trainable = False
+
+    model.compile(optimizer=Adam(learning_rate=1e-4), 
+                loss='sparse_categorical_crossentropy', 
+                metrics=['sparse_categorical_accuracy'])
+
+    csv_logger = tf.keras.callbacks.CSVLogger('./saved/finetune.log')
+    history = model.fit(train_gen,
+                        epochs=len(acc) + 10,
+                        callbacks=[checkpointer,plateau, earlyStopping,csv_logger],
+                        validation_data=val_gen,
                     )
 
 
-acc = history.history['accuracy']
-val_acc = history.history['val_accuracy']
 
-loss = history.history['loss']
-val_loss = history.history['val_loss']
+    acc += history.history['accuracy']
+    val_acc += history.history['val_sparse_categorical_accuracy']
 
-# Fine tune 
-print("Fine-tuning....")
-pretrained_model.trainable = True
-# Fine-tune from this layer onwards
-fine_tune_at = 150
-
-# # Freeze all the layers before the `fine_tune_at` layer
-for layer in model.layers[:fine_tune_at]:
-    layer.trainable = False
-
-model.compile(optimizer=Adam(learning_rate=1e-5), 
-            loss='categorical_crossentropy', 
-            metrics=['accuracy'])
+    loss += history.history['loss']
+    val_loss += history.history['val_loss']
 
 epochs_range = range(len(acc))
-
-history = model.fit(train_gen,
-                    epochs=len(acc) + 10,
-                    callbacks=[checkpointer,plateau, earlyStopping],
-                    validation_data=val_gen,
-                    )
-
-
-
-acc += history.history['accuracy']
-val_acc += history.history['val_accuracy']
-
-loss += history.history['loss']
-val_loss += history.history['val_loss']
-
 model = tf.keras.models.load_model('./saved/latest_checkpoint.h5')
 scores = model.evaluate(test_gen, verbose=1)
 print('Testing loss: ', scores[0])

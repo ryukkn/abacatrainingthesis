@@ -195,7 +195,7 @@ IMAGE_SIZE = 224
 test_gen_unaugmented = tf.keras.utils.image_dataset_from_directory(test_dir,
                                                             shuffle=True,
                                                             batch_size=BATCH_SIZE,
-                                                            seed=20,
+                                                            seed=600,
                                                             label_mode = "categorical",
                                                             image_size=(IMAGE_SIZE, IMAGE_SIZE))
 

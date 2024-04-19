@@ -130,8 +130,8 @@ def foreground_extractor(x):
 
 
     # Convert pixels close to black to white
-    # threshold = 100  # Adjust as needed
-    # x[np.sum(x < threshold, axis=2) == 3] = [255, 255, 255]
+    threshold = 100  # Adjust as needed
+    x[np.sum(x < threshold, axis=2) == 3] = [255, 255, 255]
     return x.astype(np.float64)
 # , 96  128, 156
 def preprocess_functions(p=1.0, size_list=[64, 72, 96], augmented=False):
@@ -140,6 +140,7 @@ def preprocess_functions(p=1.0, size_list=[64, 72, 96], augmented=False):
         # x = foreground_extractor(x)
         # x = crop_center(x, int(width/1.5), int(width/1.5))
         # Inner move
+        x = crop()(x)
         if(np.random.random() < p) and augmented:
             # x =  geodesic_reconstruction_mmce(x)
             _patch_size = sample(size_list, k=1)[0]
@@ -176,32 +177,34 @@ def crop_center(image, crop_width, crop_height):
     # Perform cropping
     cropped_image = image[start_y:end_y, start_x:end_x]
     
-    return    foreground_extractor(cv2.resize(cropped_image, (224,224),  interpolation=cv2.INTER_NEAREST)) 
+    # return    foreground_extractor(cv2.resize(cropped_image, (224,224),  interpolation=cv2.INTER_NEAREST)) 
+    return    cv2.resize(cropped_image, (224,224),  interpolation=cv2.INTER_NEAREST)
 
 def crop():
     def _crop(x):
         height, width = x.shape[:2]
-        return  crop_center(x, int(width/1.5), int(width/1.5))
+        return  crop_center(x, int(width/2), int(width/2))
     return _crop
 
 rescaler = 1
 
 preprocess_function = preprocess_functions(p=0.8)
-test_dir  = '../../../../nodeserver/data/grades'
+test_dir  = './dataset-a/train'
 test_datagen = ImageDataGenerator(
                                    
                                    rescale=1./rescaler,
                                     preprocessing_function  = preprocess_functions(augmented=True),
                                 #    horizontal_flip=True, vertical_flip=True,
-                                   horizontal_flip=True, vertical_flip=True,
-                                    validation_split=0.2,
-                                    width_shift_range=0.1,
-                                    height_shift_range=0.1,
-                                    fill_mode='wrap',
-                                    shear_range=0.1,
-                                    brightness_range=[0.95,1.05],
-                                    zoom_range=[0.95,1.05],
-                                    rotation_range=90
+                                #    horizontal_flip=True, vertical_flip=True,
+                                #     validation_split=0.2,
+                                #     width_shift_range=0.1,
+                                #     height_shift_range=0.1,
+                                #     fill_mode='wrap',
+                                #     shear_range=0.1,
+                                #     brightness_range=[0.95,1.05],
+                                #     zoom_range=[0.95,1.05],
+                                #     rotation_range=90
+                                    
                                 )
 
 test_datagen_nopr = ImageDataGenerator(
@@ -212,8 +215,8 @@ test_datagen_nopr = ImageDataGenerator(
                                 )
                                 
 train_images = test_datagen.flow_from_directory(test_dir, target_size=(224,224),
-                seed=3200,
-                batch_size=32,subset="training", class_mode="categorical", shuffle=True)
+                seed=100,
+                batch_size=1,subset="training", class_mode="categorical", shuffle=True)
 class_indices = train_images.class_indices
 
 # Count the number of images per class
@@ -227,7 +230,7 @@ for class_name, count in images_per_class.items():
     print(f"Class: {class_name}, Number of Images: {count}")
 test_images = test_datagen.flow_from_directory(test_dir, target_size=(224,224),
                 seed=10,
-                batch_size=32,subset="validation", class_mode="categorical", shuffle=True)
+                batch_size=1,subset="validation", class_mode="categorical", shuffle=True)
 test_images_nopr = test_datagen_nopr.flow_from_directory(test_dir, target_size=(224,224),
                 seed=10,
                 batch_size=32,subset="validation", class_mode="categorical", shuffle=True)

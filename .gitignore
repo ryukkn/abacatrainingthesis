@@ -1,4 +1,9 @@
 dataset/*
+dataset-a/*
+dataset-b/*
+dataset-f/*
 saved/*
 env/*
 env39/*
+monopoly.py
+assets

@@ -2,6 +2,7 @@ import os
 import cv2
 import numpy as np
 from random import sample
+import shutil
 
 def preprocess_functions(p=1.0, size_list=[64, 72, 96], innerMove=False):
     def _preprocess_functions(x):
@@ -22,6 +23,11 @@ def preprocess_functions(p=1.0, size_list=[64, 72, 96], innerMove=False):
         return x
     return _preprocess_functions
 
+
+
+print("Initializing.....")
+
+shutil.copytree( './dataset/train',  './dataset/augmented')
 # Define your image directory
 image_dir = './dataset/augmented'
 
@@ -43,11 +49,12 @@ for folder in folders:
     image_files.extend(folder_image_files)
 
 
+
+print("Augmenting Data.....")
 # Apply preprocessing to each image
 for image_file in image_files:
-    print(image_file)
     image = cv2.imread(image_file)
-    resized_image = cv2.resize(image, (224, 224))
+    resized_image = cv2.resize(image, (320, 320))
     # Apply preprocessing function
     preprocessed_image = preprocess_functions(innerMove=True)(resized_image)
     

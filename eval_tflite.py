@@ -3,7 +3,8 @@ import tensorflow as tf
 import os
 
 # Load the TFLite model and allocate tensors.
-interpreter = tf.lite.Interpreter(model_path="./saved/model.tflite")
+# interpreter = tf.lite.Interpreter(model_path='../../../../abaca_v1/abaca_classification/assets/model/model.tflite')
+interpreter = tf.lite.Interpreter(model_path='./saved/model.tflite')
 interpreter.allocate_tensors()
 
 # Get input and output details
@@ -24,6 +25,8 @@ test_images_dir = "./dataset/test"
 accuracy = []
 # Iterate through test images
 index = 0
+overall_correct = 0
+overall_predictiions = 0
 for folder in os.listdir(test_images_dir):
     count = 0
     length = len(os.listdir(os.path.join(test_images_dir, folder)))
@@ -53,7 +56,9 @@ for folder in os.listdir(test_images_dir):
                 correct+=1
             count+=1
             # print("Image:", filename, "Predicted class:", predictions)
+    overall_correct += correct
+    overall_predictiions += length
     accuracy.append(correct/length)
     index +=1
-
-print(accuracy)
+print("Accuracy: ", overall_correct/overall_predictiions)
+print("Per Class accuracy",accuracy)

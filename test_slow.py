@@ -6,7 +6,7 @@ from tensorflow.keras.preprocessing.image import ImageDataGenerator
 from sklearn.metrics import confusion_matrix, classification_report, ConfusionMatrixDisplay 
 
 import cv2
-model = tf.keras.models.load_model('../MobilenetV3/saved/latest_checkpoint.h5')
+model = tf.keras.models.load_model('./saved/best/Small/Batch 16 split 0.8/latest_checkpoint.h5')
 model.summary()
 # Visualize
 
@@ -101,17 +101,15 @@ def plot_value_array(i, predictions_array, true_label):
   thisplot[true_label].set_color('blue')
 
 
-test_dir  = '../../../../nodeserver/data/grades'
+test_dir  = './dataset/test'
 test_datagen = ImageDataGenerator(
-                                   validation_split=0.1,
-                                  #  rescale = 1/255
                                     preprocessing_function  = crop(),
+     
                                    )
                                    
 
 test_images = test_datagen.flow_from_directory(test_dir, target_size=(224,224),
-                batch_size=32,subset="validation", class_mode="sparse", shuffle=False, seed=1200)
-
+                batch_size=32,class_mode="categorical", shuffle=False)
 
 class_names = list(test_images.class_indices.keys())
 true_labels = test_images.classes
@@ -122,15 +120,32 @@ for i in range(len(test_images)):
 one_hot_true_labels = np.eye(len(class_names))[true_labels]
 print(class_names)
 
-plt.figure(figsize=(10, 10))
-for images, labels in  next(zip(test_images)):
-        for i in range(9):
-                ax = plt.subplot(3, 3, i + 1)
-                plt.imshow(images[i].astype("uint8"))
-                plt.title(class_names[np.argmax(labels[i])])
-                plt.axis("off")
-plt.show()
+# plt.figure(figsize=(10, 10))
+# for images, labels in  next(zip(test_images)):
+#         for i in range(9):
+#                 ax = plt.subplot(3, 3, i + 1)
+#                 plt.imshow(images[i].astype("uint8"))
+#                 plt.title(class_names[np.argmax(labels[i])])
+#                 plt.axis("off")
+# plt.show()
 
+def perf_measure(y_actual, y_hat):
+    TP = 0
+    FP = 0
+    TN = 0
+    FN = 0
+
+    for i in range(len(y_hat)): 
+        if y_actual[i]==y_hat[i]==1:
+           TP += 1
+        if y_hat[i]==1 and y_actual[i]!=y_hat[i]:
+           FP += 1
+        if y_actual[i]==y_hat[i]==0:
+           TN += 1
+        if y_hat[i]==0 and y_actual[i]!=y_hat[i]:
+           FN += 1
+
+    return(TP, FP, TN, FN)
 
 # print('\nEvaluating test images....')
 # test_loss, test_acc = model.evaluate(test_images, verbose=1)
@@ -143,6 +158,32 @@ predicted_labels = np.argmax(predictions, axis=1)
 conf_matrix = confusion_matrix(true_labels, predicted_labels)
 overall_accuracy = np.trace(conf_matrix) / np.sum(conf_matrix)
 print('\nTest accuracy from confusion matrix:', overall_accuracy)
+FP = conf_matrix.sum(axis=0) - np.diag(conf_matrix)  
+FN = conf_matrix.sum(axis=1) - np.diag(conf_matrix)
+TP = np.diag(conf_matrix)
+TN = conf_matrix.sum() - (FP + FN + TP)
+
+print(FP, TN, FN, TP)
+FP, FN, TP, TN = sum(FP), sum(FN), sum(TP), sum(TN)
+print(FP, TN, FN, TP)
+accuracy = (TP + TN) / (TP + TN + FP + FN)
+precision = TP / (TP + FP)
+recall = TP / (TP + FN)
+f1_score = 2 * (precision * recall) / (precision + recall)
+specificity = TN / (TN + FP)
+false_positive_rate = FP / (TN + FP)
+
+
+
+print("Confusion Matrix:")
+print(conf_matrix)
+print("\nEvaluation Metrics:")
+print(f"Accuracy: {accuracy:.2f}")
+print(f"Precision: {precision:.2f}")
+print(f"Recall: {recall:.2f}")
+print(f"F1 Score: {f1_score:.2f}")
+print(f"Specificity: {specificity:.2f}")
+print(f"False Positive Rate: {false_positive_rate:.2f}")
 correct_per_class = np.diag(conf_matrix)
 total_per_class = np.sum(conf_matrix, axis=1)
 incorrect_per_class = total_per_class - correct_per_class
